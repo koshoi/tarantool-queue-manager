@@ -76,9 +76,18 @@ local defaults = {
 	__tostring = function (task)
 		return json.encode(task.data)
 	end,
+
+	validate_task = function(task_data)
+		return true
+	end
 }
 
 function put (qm, task_data, delay)
+	local ok, err = qm.validate_task(task_data)
+	if not ok then
+		return nil, err
+	end
+
 	local task = setmetatable({
 		prefix = qm.prefix_generator(),
 		data = task_data,
@@ -159,7 +168,7 @@ function M.attach_on_queue (qname, args)
 	for _, v in ipairs({
 		'on_take', 'on_put', 'on_success',
 		'on_fail', 'on_fatal', 'on_delay',
-		'prefix_generator', '__tostring'
+		'prefix_generator', '__tostring', 'validate_task'
 	}) do
 		assert(type(manager[v]) == 'function', "not a function for " .. v)
 	end
