@@ -40,6 +40,7 @@ local defaults = {
 	default_delay = 1,
 	delay_multiplier = 2,
 	delay_threshold = 3600,
+	max_attempts = -1,
 	prefix_generator = function ()
 		return randomb58(10)
 	end,
@@ -52,16 +53,25 @@ local defaults = {
 		fiber_log.info("[%s] task=%s is put to queue", task.prefix, task)
 	end,
 
-	on_success = function(self, task, result)
-		fiber_log.info("[%s] task=%s is finished successfully with result=%s", task.prefix, task, (result or ''))
+	on_success = function(self, task, result, ...)
+		fiber_log.info(
+			"[%s] task=%s is finished successfully with result=%s",
+			task.prefix, task, string.format(result or '', ...)
+		)
 	end,
 
-	on_fail = function(self, task, error)
-		fiber_log.error("[%s] task=%s has failed with error=%s, delay=%d", task.prefix, task, (error or ''), (task.delay or 0))
+	on_fail = function(self, task, error, ...)
+		fiber_log.error(
+			"[%s] task=%s has failed with error=%s, delay=%d",
+			task.prefix, task, string.format(error or '', ...), (task.delay or 0)
+		)
 	end,
 
-	on_fatal = function(self, task, error)
-		fiber_log.error("[%s] task=%s has a fatal failure=%s, burrying", task.prefix, task, (error or ''))
+	on_fatal = function(self, task, error, ...)
+		fiber_log.error(
+			"[%s] task=%s has a fatal failure=%s, burrying",
+			task.prefix, task, string.format(error or '', ...)
+		)
 	end,
 
 	on_delay = function (self, task)
@@ -70,6 +80,12 @@ local defaults = {
 		if task.delay > self.delay_threshold then
 			task.delay = self.delay_threshold
 		end
+		return task
+	end,
+
+	on_attempts = function (self, task)
+		task.attempts = task.attempts or 0
+		task.attempts = task.attempts + 1
 		return task
 	end,
 
@@ -109,6 +125,7 @@ function take (qm, timeout)
 	local task = setmetatable({
 		id = t[1],
 		delay = t[3].delay,
+		attempts = t[3].attempts or 0,
 		prefix = t[3].prefix,
 		data = t[3].data,
 		qmanager = qm,
@@ -118,28 +135,39 @@ function take (qm, timeout)
 				task.prefix, ...
 			)
 		end,
+
 		log_error = function (task, str, ...)
 			fiber_log.error(
 				table.concat({"[%s] ", str}),
 				task.prefix, ...
 			)
 		end,
-		success = function (task, result)
-			task.qmanager:on_success(task, result)
+
+		success = function (task, result, ...)
+			task.qmanager:on_success(task, result, ...)
 			return queue.tube[task.qmanager.qname]:ack(task.id)
 		end,
-		fail = function (task, error)
+
+		fail = function (task, error, ...)
 			task.qmanager:on_delay(task)
-			task.qmanager:on_fail(task, error)
-			box.space[task.qmanager.qname]:update(task.id, {{'=', 8, {
-				data   = task.data,
-				prefix = task.prefix,
-				delay  = task.delay
+			task.qmanager:on_attempts(task)
+			task.qmanager:on_fail(task, error, ...)
+
+			if task.qmanager.max_attempts > 0 and task.attempts > task.qmanager.max_attempts then
+				return task:fatal("task reached max attempts")
+			end
+
+			local upt = box.space[task.qmanager.qname]:update(task.id, {{'=', 8, {
+				data     = task.data,
+				prefix   = task.prefix,
+				delay    = task.delay,
+				attempts = task.attempts
 			}}})
 			return queue.tube[task.qmanager.qname]:release(task.id, { delay = task.delay })
 		end,
-		fatal = function (task, error)
-			task.qmanager:on_fatal(task, error)
+
+		fatal = function (task, error, ...)
+			task.qmanager:on_fatal(task, error, ...)
 			return queue.tube[task.qmanager.qname]:bury(task.id)
 		end,
 	}, {
