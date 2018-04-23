@@ -5,21 +5,6 @@ local json  = require 'json'
 
 local fiber_log = {}
 
-local base58 = { "A","B","C","D","E","F","G","H","J","K","L","M","N","P","Q","R","S","T","U","V","W","X","Y","Z","a","b","c","d","e","f","g","h","i","j","k","m","n","o","p","q","r","s","t","u","v","w","x","y","z","1","2","3","4","5","6","7","8","9" }
-math.randomseed(tonumber(fiber.time64()))
-
-function randomb58(len)
-	if not len or len == 0 then
-		return ''
-	end
-
-	local rand = ''
-	for i = 1,len do
-		rand = rand .. base58[ math.random(1,#base58) ]
-	end
-	return rand
-end
-
 function fiber_log.info (str, ...)
 	log.info(
 		table.concat({"[FIBER::%s::%d] ", str}),
@@ -32,6 +17,21 @@ function fiber_log.error (str, ...)
 		table.concat({"[FIBER::%s::%d] ", str}),
 		(fiber.self().name()  or ''), (fiber.self().id() or -1), ...
 	)
+end
+
+local base58 = { "A","B","C","D","E","F","G","H","J","K","L","M","N","P","Q","R","S","T","U","V","W","X","Y","Z","a","b","c","d","e","f","g","h","i","j","k","m","n","o","p","q","r","s","t","u","v","w","x","y","z","1","2","3","4","5","6","7","8","9" }
+math.randomseed(tonumber(fiber.time64()))
+
+local randomb58 = function (len)
+	if not len or len == 0 then
+		return ''
+	end
+
+	local rand = ''
+	for i = 1,len do
+		rand = rand .. base58[ math.random(1,#base58) ]
+	end
+	return rand
 end
 
 local M = {}
@@ -98,7 +98,7 @@ local defaults = {
 	end
 }
 
-function put (qm, task_data, delay)
+local put = function (qm, task_data, delay)
 	local ok, err = qm.validate_task(task_data)
 	if not ok then
 		return nil, err
@@ -116,7 +116,7 @@ function put (qm, task_data, delay)
 	return queue.tube[qm.qname]:put(task)
 end
 
-function take (qm, timeout)
+local take = function (qm, timeout)
 	local t = queue.tube[qm.qname]:take(timeout)
 	if not t then
 		return nil
